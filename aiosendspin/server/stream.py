@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import sys
 import types
 from collections import deque
 from collections.abc import AsyncGenerator, Callable
@@ -28,6 +29,22 @@ def _get_av() -> types.ModuleType:
     return _av
 
 
+_numpy_unavailable = False
+
+
+def _get_numpy() -> types.ModuleType | None:
+    """Lazy import of numpy for ~28x faster s32-to-s24 conversion."""
+    global _numpy_unavailable  # noqa: PLW0603
+    if _numpy_unavailable:
+        return None
+    try:
+        import numpy as np  # noqa: PLC0415
+    except ImportError:
+        _numpy_unavailable = True
+        return None
+    return np  # type: ignore[no-any-return,unused-ignore]
+
+
 # Universal main channel ID for the primary audio source.
 # Used as the canonical source for visualization and as a fallback when
 # player_channel() returns None.
@@ -41,7 +58,7 @@ class AudioFormat:
     sample_rate: int
     """Sample rate in Hz (e.g., 44100, 48000)."""
     bit_depth: int
-    """Bit depth in bits per sample (16 or 24)."""
+    """Bit depth in bits per sample (16, 24, or 32)."""
     channels: int
     """Number of audio channels (1 for mono, 2 for stereo)."""
     codec: AudioCodec = AudioCodec.PCM
@@ -194,16 +211,31 @@ class BufferTracker:
         self.buffered_bytes += byte_count
 
 
-def _resolve_audio_format(audio_format: AudioFormat) -> tuple[int, str, str]:
-    """Resolve helper data for an audio format."""
+def _resolve_audio_format(audio_format: AudioFormat) -> tuple[int, str, str, int]:
+    """Resolve helper data for an audio format.
+
+    Returns:
+        Tuple of (wire_bytes_per_sample, av_format, layout, av_bytes_per_sample).
+        - wire_bytes_per_sample: Bytes per sample for wire format (e.g., 3 for 24-bit)
+        - av_format: PyAV format string (e.g., "s32" for 24-bit since PyAV doesn't support s24)
+        - layout: Channel layout string ("mono" or "stereo")
+        - av_bytes_per_sample: Bytes per sample from PyAV resampler output
+    """
     if audio_format.bit_depth == 16:
-        bytes_per_sample = 2
+        wire_bytes = 2
         av_format = "s16"
+        av_bytes = 2
     elif audio_format.bit_depth == 24:
-        bytes_per_sample = 3
-        av_format = "s24"
+        # PyAV doesn't support s24 natively - use s32 and convert
+        wire_bytes = 3
+        av_format = "s32"
+        av_bytes = 4
+    elif audio_format.bit_depth == 32:
+        wire_bytes = 4
+        av_format = "s32"
+        av_bytes = 4
     else:
-        raise ValueError("Only 16-bit and 24-bit PCM are supported")
+        raise ValueError(f"Unsupported bit depth: {audio_format.bit_depth}")
 
     if audio_format.channels == 1:
         layout = "mono"
@@ -212,7 +244,28 @@ def _resolve_audio_format(audio_format: AudioFormat) -> tuple[int, str, str]:
     else:
         raise ValueError("Only mono and stereo layouts are supported")
 
-    return bytes_per_sample, av_format, layout
+    return wire_bytes, av_format, layout, av_bytes
+
+
+def _convert_s32_to_s24(data: bytes) -> bytes:
+    """Convert 32-bit samples to packed 24-bit samples.
+
+    Extracts the upper 24 bits from each 32-bit sample by dropping the LSB.
+    Uses numpy when available (~28x faster), falls back to byte slicing.
+    """
+    if len(data) % 4:
+        raise ValueError("s32 PCM buffer length must be a multiple of 4 bytes")
+    if np := _get_numpy():
+        if sys.byteorder == "little":
+            arr = np.frombuffer(data, dtype="<i4")
+            return bytes(arr.view(np.uint8).reshape(-1, 4)[:, 1:4].tobytes())
+        arr = np.frombuffer(data, dtype=">i4")
+        return bytes(arr.view(np.uint8).reshape(-1, 4)[:, 0:3].tobytes())
+
+    # Fallback: direct byte slicing
+    if sys.byteorder == "little":
+        return b"".join(data[i + 1 : i + 4] for i in range(0, len(data), 4))
+    return b"".join(data[i : i + 3] for i in range(0, len(data), 4))
 
 
 def build_encoder_for_format(
@@ -225,6 +278,11 @@ def build_encoder_for_format(
     if audio_format.codec == AudioCodec.PCM:
         samples_per_chunk = int(audio_format.sample_rate * 0.025)
         return None, None, samples_per_chunk
+
+    if audio_format.codec == AudioCodec.FLAC and audio_format.bit_depth not in (16, 24, 32):
+        raise ValueError(
+            f"Unsupported FLAC bit depth: {audio_format.bit_depth} (supported: 16, 24, or 32)"
+        )
 
     codec = "libopus" if audio_format.codec == AudioCodec.OPUS else audio_format.codec.value
 
@@ -282,7 +340,7 @@ class AudioFormatParams:
     frame_stride: int
     """Bytes per frame (bytes_per_sample * channels)."""
     av_format: str
-    """PyAV format string (e.g., 's16', 's24')."""
+    """PyAV format string (e.g., 's16', 's32')."""
     av_layout: str
     """PyAV channel layout (e.g., 'mono', 'stereo')."""
 
@@ -328,7 +386,9 @@ class PipelineState:
     target_format: AudioFormat
     """Target output format."""
     target_frame_stride: int
-    """Target bytes per frame."""
+    """Target bytes per frame for wire format (e.g., 6 for 24-bit stereo)."""
+    av_frame_stride: int
+    """Bytes per frame from PyAV resampler (e.g., 8 for 24-bit stereo using s32)."""
     target_av_format: str
     """Target PyAV format string."""
     target_layout: str
@@ -341,6 +401,8 @@ class PipelineState:
     """PyAV encoder (None for PCM)."""
     codec_header_b64: str | None
     """Base64 encoded codec header."""
+    needs_s32_to_s24_conversion: bool = False
+    """Whether output needs 32-bit to 24-bit conversion."""
     buffer: bytearray = field(default_factory=bytearray)
     """Resampled PCM buffer awaiting encoding."""
     prepared: deque[PreparedChunkState] = field(default_factory=deque)
@@ -633,9 +695,7 @@ class Streamer:
         channel_state = self._channels[channel_id]
         source_format_params = channel_state.source_format_params
 
-        target_bytes_per_sample, target_av_format, target_layout = _resolve_audio_format(
-            audio_format
-        )
+        wire_bytes, target_av_format, target_layout, av_bytes = _resolve_audio_format(audio_format)
 
         av = _get_av()
         resampler = av.AudioResampler(
@@ -652,13 +712,17 @@ class Streamer:
             source_format_params=source_format_params,
             channel_id=channel_id,
             target_format=audio_format,
-            target_frame_stride=target_bytes_per_sample * audio_format.channels,
+            target_frame_stride=wire_bytes * audio_format.channels,
+            av_frame_stride=av_bytes * audio_format.channels,
             target_av_format=target_av_format,
             target_layout=target_layout,
             chunk_samples=chunk_samples,
             resampler=resampler,
             encoder=encoder,
             codec_header_b64=codec_header_b64,
+            needs_s32_to_s24_conversion=(
+                audio_format.codec == AudioCodec.PCM and audio_format.bit_depth == 24
+            ),
         )
         self._pipelines[pipeline_key] = pipeline
         return pipeline
@@ -744,12 +808,12 @@ class Streamer:
         # Update or create channel states
         for channel_id, audio_format in channel_formats.items():
             if channel_id not in self._channels:
-                bytes_per_sample, av_format, av_layout = _resolve_audio_format(audio_format)
+                wire_bytes, av_format, av_layout, _ = _resolve_audio_format(audio_format)
                 self._channels[channel_id] = ChannelState(
                     source_format_params=AudioFormatParams(
                         audio_format=audio_format,
-                        bytes_per_sample=bytes_per_sample,
-                        frame_stride=bytes_per_sample * audio_format.channels,
+                        bytes_per_sample=wire_bytes,
+                        frame_stride=wire_bytes * audio_format.channels,
                         av_format=av_format,
                         av_layout=av_layout,
                     ),
@@ -1300,8 +1364,12 @@ class Streamer:
         frame.planes[0].update(source_chunk.pcm_data)
         out_frames = pipeline.resampler.resample(frame)
         for out_frame in out_frames:
-            expected = pipeline.target_frame_stride * out_frame.samples
+            # Use av_frame_stride for resampler output (may differ from wire format for 24-bit)
+            expected = pipeline.av_frame_stride * out_frame.samples
             pcm_bytes = bytes(out_frame.planes[0])[:expected]
+            # Convert s32 to packed s24 if needed
+            if pipeline.needs_s32_to_s24_conversion:
+                pcm_bytes = _convert_s32_to_s24(pcm_bytes)
             pipeline.buffer.extend(pcm_bytes)
         self._drain_pipeline_buffer(pipeline, force_flush=False)
 
@@ -1351,7 +1419,11 @@ class Streamer:
             pipeline.buffer.clear()
             return
 
-        frame_stride = pipeline.target_frame_stride
+        frame_stride = (
+            pipeline.av_frame_stride
+            if pipeline.encoder is not None
+            else pipeline.target_frame_stride
+        )
         while len(pipeline.buffer) >= frame_stride:
             available_samples = len(pipeline.buffer) // frame_stride
             if not force_flush and available_samples < pipeline.chunk_samples:
