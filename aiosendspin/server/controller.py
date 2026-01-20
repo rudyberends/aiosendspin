@@ -39,6 +39,12 @@ class ControllerClient:
 
         if payload.command == MediaCommand.SWITCH:
             await self._handle_switch()
+        elif payload.command == MediaCommand.SELECT_SOURCE:
+            if payload.source_id is None:
+                self.client.group.select_source(None)
+                return
+            if not self.client.group.select_source(payload.source_id):
+                self._logger.warning("Unknown source id '%s'", payload.source_id)
         else:
             # Forward other commands to the group
             self.client.group._handle_group_command(payload)  # noqa: SLF001

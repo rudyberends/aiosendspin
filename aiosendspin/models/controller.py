@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.orjson import DataClassORJSONMixin
 
+from .source import ControllerSourceItem
 from .types import MediaCommand
 
 
@@ -30,6 +31,8 @@ class ControllerCommandPayload(DataClassORJSONMixin):
     """Volume range 0-100, only set if command is volume."""
     mute: bool | None = None
     """True to mute, false to unmute, only set if command is mute."""
+    source_id: str | None = None
+    """Source id, only set if command is select_source."""
 
     def __post_init__(self) -> None:
         """Validate field values and command consistency."""
@@ -46,6 +49,14 @@ class ControllerCommandPayload(DataClassORJSONMixin):
                 raise ValueError("Mute must be provided when command is 'mute'")
         elif self.mute is not None:
             raise ValueError(f"Mute should not be provided for command '{self.command.value}'")
+
+        if self.command == MediaCommand.SELECT_SOURCE:
+            if self.source_id is not None and not self.source_id:
+                raise ValueError("source_id must be non-empty when command is 'select_source'")
+        elif self.source_id is not None:
+            raise ValueError(
+                f"source_id should not be provided for command '{self.command.value}'"
+            )
 
     class Config(BaseConfig):
         """Config for parsing json messages."""
@@ -67,8 +78,15 @@ class ControllerStatePayload(DataClassORJSONMixin):
     """Volume of the whole group, range 0-100."""
     muted: bool
     """Mute state of the whole group."""
+    sources: list[ControllerSourceItem] | None = None
+    """Known sources (optional)."""
 
     def __post_init__(self) -> None:
         """Validate field values."""
         if not 0 <= self.volume <= 100:
             raise ValueError(f"Volume must be in range 0-100, got {self.volume}")
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True

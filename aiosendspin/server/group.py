@@ -49,6 +49,7 @@ from aiosendspin.models.types import (
     PictureFormat,
     PlaybackStateType,
     Roles,
+    SourceCommand,
 )
 from aiosendspin.models.visualizer import StreamStartVisualizer
 
@@ -197,6 +198,10 @@ class SendspinGroup:
     """Last muted state sent to controller clients, for change detection."""
     _last_sent_supported_commands: list[MediaCommand] | None
     """Last computed supported commands sent to clients (output of _get_supported_commands())."""
+    _last_sent_sources: list["ControllerSourceItem"] | None
+    """Last computed controller sources list sent to clients."""
+    _selected_source_id: str | None
+    """Selected source id for this group."""
     _supported_commands: list[MediaCommand]
     """Commands supported by the application (input to _get_supported_commands())."""
     _playback_lock: asyncio.Lock
@@ -234,6 +239,8 @@ class SendspinGroup:
         self._last_sent_volume: int | None = None
         self._last_sent_muted: bool | None = None
         self._last_sent_supported_commands: list[MediaCommand] | None = None
+        self._last_sent_sources: list["ControllerSourceItem"] | None = None
+        self._selected_source_id: str | None = None
         self._supported_commands: list[MediaCommand] = []
         self._client_event_unsubs: dict[SendspinClient, Callable[[], None]] = {}
         self._playback_lock = asyncio.Lock()
@@ -356,16 +363,12 @@ class SendspinGroup:
                 group_name=self.group_name,
             )
         )
-        supported_commands = self._get_supported_commands()
-        controller_state = ControllerStatePayload(
-            supported_commands=supported_commands,
-            volume=self.volume,
-            muted=self.muted,
-        )
+        controller_state = self._build_controller_state()
         # Update tracking variables
         self._last_sent_volume = self.volume
         self._last_sent_muted = self.muted
-        self._last_sent_supported_commands = supported_commands
+        self._last_sent_supported_commands = controller_state.supported_commands
+        self._last_sent_sources = controller_state.sources
 
         for client in self._clients:
             # Send group/update to all clients
@@ -411,27 +414,50 @@ class SendspinGroup:
                 )
                 client.send_message(state_message)
 
+    def _build_controller_state(self) -> ControllerStatePayload:
+        """Build controller state payload for this group."""
+        supported_commands = self._get_supported_commands()
+        sources = (
+            self._server.list_sources(self._selected_source_id)
+            if self._server.has_sources()
+            else None
+        )
+        return ControllerStatePayload(
+            supported_commands=supported_commands,
+            volume=self.volume,
+            muted=self.muted,
+            sources=sources,
+        )
+
     def _send_controller_state_to_clients(self) -> None:
         """Send server/state with controller payload to all controller clients."""
         current_volume = self.volume
         current_muted = self.muted
         current_supported_commands = self._get_supported_commands()
+        current_sources = (
+            self._server.list_sources(self._selected_source_id)
+            if self._server.has_sources()
+            else None
+        )
 
         # Only send if any field changed
         if (
             self._last_sent_volume == current_volume
             and self._last_sent_muted == current_muted
             and self._last_sent_supported_commands == current_supported_commands
+            and self._last_sent_sources == current_sources
         ):
             return
 
         self._last_sent_volume = current_volume
         self._last_sent_muted = current_muted
         self._last_sent_supported_commands = current_supported_commands
+        self._last_sent_sources = current_sources
         controller_state = ControllerStatePayload(
             supported_commands=current_supported_commands,
             volume=current_volume,
             muted=current_muted,
+            sources=current_sources,
         )
         for client in self._clients:
             if client.check_role(Roles.CONTROLLER):
@@ -843,16 +869,12 @@ class SendspinGroup:
                 group_name=self.group_name,
             )
         )
-        supported_commands = self._get_supported_commands()
-        controller_state = ControllerStatePayload(
-            supported_commands=supported_commands,
-            volume=self.volume,
-            muted=self.muted,
-        )
+        controller_state = self._build_controller_state()
         # Update tracking variables
         self._last_sent_volume = self.volume
         self._last_sent_muted = self.muted
-        self._last_sent_supported_commands = supported_commands
+        self._last_sent_supported_commands = controller_state.supported_commands
+        self._last_sent_sources = controller_state.sources
 
         for client in self._clients:
             # Send group/update to all clients
@@ -1196,6 +1218,53 @@ class SendspinGroup:
         """Return player helpers for all members that support the role."""
         return [client.player for client in self._clients if client.player is not None]
 
+    @property
+    def selected_source_id(self) -> str | None:
+        """Return the selected source id for this group."""
+        return self._selected_source_id
+
+    def select_source(
+        self,
+        source_id: str | None,
+        *,
+        notify: bool = True,
+        send_commands: bool = True,
+    ) -> bool:
+        """Select a source for this group."""
+        if source_id is None:
+            previous_id = self._selected_source_id
+            self._selected_source_id = None
+            self._server.stop_source_stream(self)
+            if (
+                send_commands
+                and previous_id
+                and previous_id in self._server._sources  # noqa: SLF001
+            ):
+                previous_source = self._server._sources[previous_id]  # noqa: SLF001
+                previous_source.send_command(SourceCommand.STOP)
+            if notify:
+                self._send_controller_state_to_clients()
+            return True
+        if source_id not in self._server._sources:  # noqa: SLF001
+            return False
+        if self._selected_source_id == source_id:
+            return True
+        previous_id = self._selected_source_id
+        self._selected_source_id = source_id
+        self._server.stop_source_stream(self)
+
+        if send_commands:
+            if previous_id and previous_id in self._server._sources:  # noqa: SLF001
+                previous_source = self._server._sources[previous_id]  # noqa: SLF001
+                previous_source.send_command(SourceCommand.STOP)
+
+            selected_source = self._server._sources[source_id]  # noqa: SLF001
+            selected_source.send_command(SourceCommand.START)
+
+        if notify:
+            self._send_controller_state_to_clients()
+        return True
+
     def _get_supported_commands(self) -> list[MediaCommand]:
         """Get list of commands supported based on application capabilities."""
         # Commands handled internally by this library (always supported)
@@ -1206,6 +1275,8 @@ class SendspinGroup:
             MediaCommand.MUTE,
             MediaCommand.SWITCH,
         ]
+        if self._server.has_sources():
+            protocol_commands.append(MediaCommand.SELECT_SOURCE)
 
         if self._supported_commands:
             # Return union of protocol commands and app-declared commands
@@ -1521,11 +1592,7 @@ class SendspinGroup:
 
         controller_for_client = None
         if client.check_role(Roles.CONTROLLER):
-            controller_for_client = ControllerStatePayload(
-                supported_commands=self._get_supported_commands(),
-                volume=self.volume,
-                muted=self.muted,
-            )
+            controller_for_client = self._build_controller_state()
 
         # Send single server/state message with all relevant payloads
         if metadata_for_client is not None or controller_for_client is not None:

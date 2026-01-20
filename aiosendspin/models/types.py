@@ -67,6 +67,8 @@ class Roles(Enum):
 
     Has preferred format for audio features.
     """
+    SOURCE = "source@v1"
+    """Provides audio input to the server."""
 
 
 class BinaryMessageType(Enum):
@@ -85,6 +87,10 @@ class BinaryMessageType(Enum):
     """Artwork channel 2 (Artwork role, slot 2)."""
     ARTWORK_CHANNEL_3 = 11
     """Artwork channel 3 (Artwork role, slot 3)."""
+
+    # Source role (bits 000011xx, IDs 12-15):
+    SOURCE_AUDIO_CHUNK = 12
+    """Source audio chunks with timestamps (Source role, slot 0)."""
 
     # Visualizer role (bits 00010xxx, IDs 16-23):
     VISUALIZATION_DATA = 16
@@ -108,6 +114,28 @@ class ClientStateType(Enum):
     """Client has a problem preventing normal operation."""
     EXTERNAL_SOURCE = "external_source"
     """Client is in use by an external system and cannot participate in Sendspin playback."""
+
+
+class SourceStateType(Enum):
+    """Enum for Source States."""
+
+    IDLE = "idle"
+    """Source is available but not actively streaming."""
+    STREAMING = "streaming"
+    """Source is actively streaming audio."""
+    ERROR = "error"
+    """Source is unavailable due to an error."""
+
+
+class SourceSignalType(Enum):
+    """Enum for Source Signal Presence."""
+
+    UNKNOWN = "unknown"
+    """Source signal status is unknown."""
+    PRESENT = "present"
+    """Signal is present."""
+    ABSENT = "absent"
+    """Signal is absent."""
 
 
 # DEPRECATED(before-spec-pr-50): Remove once all clients use client-level state
@@ -153,6 +181,21 @@ class MediaCommand(Enum):
     SHUFFLE = "shuffle"
     UNSHUFFLE = "unshuffle"
     SWITCH = "switch"
+    SELECT_SOURCE = "select_source"
+
+
+class SourceCommand(Enum):
+    """Enum for Source Commands."""
+
+    START = "start"
+    STOP = "stop"
+
+
+class SourceClientCommand(Enum):
+    """Enum for Source client commands."""
+
+    STARTED = "started"
+    STOPPED = "stopped"
 
 
 class PictureFormat(Enum):

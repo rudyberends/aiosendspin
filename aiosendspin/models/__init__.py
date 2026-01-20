@@ -17,6 +17,11 @@ __all__ = [
     "PlayerStateType",
     "RepeatMode",
     "Roles",
+    "SourceCommand",
+    "SourceClientCommand",
+    "SourceSignalType",
+    "SourceStateType",
+    "SourceVadSettings",
     "ServerMessage",
     "UndefinedField",
     "artwork",
@@ -26,6 +31,7 @@ __all__ = [
     "pack_binary_header",
     "pack_binary_header_raw",
     "player",
+    "source",
     "types",
     "undefined_field",
     "unpack_binary_header",
@@ -34,8 +40,9 @@ __all__ = [
 import struct
 from typing import NamedTuple
 
-from . import artwork, controller, core, metadata, player, types, visualizer
+from . import artwork, controller, core, metadata, player, source, types, visualizer
 from .core import DeviceInfo
+from .source import SourceVadSettings
 from .types import (
     AudioCodec,
     BinaryMessageType,
@@ -47,6 +54,10 @@ from .types import (
     PlayerStateType,
     RepeatMode,
     Roles,
+    SourceCommand,
+    SourceClientCommand,
+    SourceSignalType,
+    SourceStateType,
     ServerMessage,
     UndefinedField,
     undefined_field,

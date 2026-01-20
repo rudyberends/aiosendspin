@@ -30,6 +30,12 @@ from .player import (
     StreamRequestFormatPlayer,
     StreamStartPlayer,
 )
+from .source import (
+    ClientHelloSourceSupport,
+    SourceClientCommandPayload,
+    SourceCommandPayload,
+    SourceStatePayload,
+)
 from .types import (
     ClientMessage,
     ClientStateType,
@@ -55,6 +61,7 @@ _CLIENT_HELLO_LEGACY_FIELD_ALIASES: dict[str, str] = {
     "player_support": "player@v1_support",
     "artwork_support": "artwork@v1_support",
     "visualizer_support": "visualizer@v1_support",
+    "source_support": "source@v1_support",
 }
 
 
@@ -72,6 +79,13 @@ class DeviceInfo(DataClassORJSONMixin):
     class Config(BaseConfig):
         """Config for parsing json messages."""
 
+        aliases = {
+            "player_support": "player@v1_support",
+            "artwork_support": "artwork@v1_support",
+            "visualizer_support": "visualizer@v1_support",
+            "source_support": "source@v1_support",
+        }
+        serialize_by_alias = True
         omit_none = True
 
 
@@ -98,6 +112,8 @@ class ClientHelloPayload(DataClassORJSONMixin):
         ClientHelloVisualizerSupport | None, Alias("visualizer@v1_support")
     ] = None
     """Visualizer support configuration - only if visualizer role is in supported_roles."""
+    source_support: Annotated[ClientHelloSourceSupport | None, Alias("source@v1_support")] = None
+    """Source support configuration - only if source role is in supported_roles."""
 
     @classmethod
     def __pre_deserialize__(cls, d: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +163,22 @@ class ClientHelloPayload(DataClassORJSONMixin):
         if not visualizer_role_supported:
             self.visualizer_support = None
 
+        # Validate source role and support configuration
+        source_role_supported = Roles.SOURCE in self.supported_roles
+        if source_role_supported and self.source_support is None:
+            raise ValueError(
+                "source_support must be provided when 'source' role is in supported_roles"
+            )
+        if not source_role_supported:
+            self.source_support = None
+
+    def __post_serialize__(self, d: dict[str, Any]) -> dict[str, Any]:
+        """Normalize support fields to spec-compliant names on serialization."""
+        for legacy_name, spec_name in _CLIENT_HELLO_LEGACY_FIELD_ALIASES.items():
+            if legacy_name in d and spec_name not in d:
+                d[spec_name] = d.pop(legacy_name)
+        return d
+
     class Config(BaseConfig):
         """Config for parsing json messages."""
 
@@ -194,6 +226,8 @@ class ClientStatePayload(DataClassORJSONMixin):
     """
     player: PlayerStatePayload | None = None
     """Player state - only if client has player role."""
+    source: SourceStatePayload | None = None
+    """Source state - only if client has source role."""
 
     class Config(BaseConfig):
         """Config for parsing json messages."""
@@ -216,6 +250,8 @@ class ClientCommandPayload(DataClassORJSONMixin):
 
     controller: ControllerCommandPayload | None = None
     """Controller commands - only if client has controller role."""
+    source: SourceClientCommandPayload | None = None
+    """Source client commands - only if client has source role."""
 
     class Config(BaseConfig):
         """Config for parsing json messages."""
@@ -351,6 +387,8 @@ class ServerCommandPayload(DataClassORJSONMixin):
 
     player: PlayerCommandPayload | None = None
     """Player commands - only sent to clients with player role."""
+    source: SourceCommandPayload | None = None
+    """Source commands - only sent to clients with source role."""
 
     class Config(BaseConfig):
         """Config for parsing json messages."""

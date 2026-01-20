@@ -20,9 +20,14 @@ from zeroconf import (
 )
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
+from aiosendspin.models.source import ControllerSourceItem
+from aiosendspin.models.types import AudioCodec, SourceStateType
 from aiosendspin.util import get_local_ip
 
 from .client import SendspinClient
+from .source import SourceClient
+from .source_stream import SourceStreamSession, build_source_media_stream
+from .stream import AudioFormat
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,10 @@ class SendspinServer:
     """All clients connected to this server."""
     _pending_clients: set[SendspinClient]
     """Clients that have connected but haven't completed the protocol handshake."""
+    _sources: dict[str, SourceClient]
+    """Sources registered with this server."""
+    _source_streams: dict[str, SourceStreamSession]
+    """Active source stream sessions keyed by group id."""
     _loop: asyncio.AbstractEventLoop
     _event_cbs: list[Callable[[SendspinServer, SendspinEvent], None]]
     _connection_tasks: dict[str, asyncio.Task[None]]
@@ -125,6 +134,8 @@ class SendspinServer:
         """
         self._clients: set[SendspinClient] = set()
         self._pending_clients: set[SendspinClient] = set()
+        self._sources: dict[str, SourceClient] = {}
+        self._source_streams: dict[str, SourceStreamSession] = {}
         self._loop = loop
         self._event_cbs = []
         self._id = server_id
@@ -358,6 +369,7 @@ class SendspinServer:
         logger.debug("Adding client %s (%s) to server", client.client_id, client.name)
         self._clients.add(client)
         self._signal_event(ClientAddedEvent(client.client_id))
+        client.group._send_controller_state_to_clients()  # noqa: SLF001
 
     def _handle_client_disconnect(self, client: SendspinClient) -> None:
         """Unregister the client from the server."""
@@ -366,7 +378,145 @@ class SendspinServer:
 
         logger.debug("Removing client %s from server", client.client_id)
         self._clients.remove(client)
+        if client.client_id in self._sources:
+            self.remove_source(client)
         self._signal_event(ClientRemovedEvent(client.client_id))
+
+    def _iter_groups(self) -> set["SendspinGroup"]:
+        """Return unique groups for all connected clients."""
+        groups: set["SendspinGroup"] = set()
+        for client in self._clients:
+            groups.add(client.group)
+        return groups
+
+    def register_source(self, client: SendspinClient) -> None:
+        """Register a source-capable client for controller discovery."""
+        if client.source is None:
+            return
+        self._sources[client.client_id] = client.source
+        self._notify_controller_sources_changed()
+
+    def update_source_state(self, client: SendspinClient, _payload: object) -> None:
+        """Update source state and notify controllers."""
+        if client.client_id not in self._sources:
+            return
+        if client.source and client.source.state != SourceStateType.STREAMING:
+            self.stop_source_stream(client.group)
+        self._notify_controller_sources_changed()
+
+    def remove_source(self, client: SendspinClient) -> None:
+        """Remove a source from the registry."""
+        self._sources.pop(client.client_id, None)
+        for group in self._iter_groups():
+            if group.selected_source_id == client.client_id:
+                group.select_source(None, notify=False, send_commands=False)
+        self._notify_controller_sources_changed()
+
+    def list_sources(self, selected_source_id: str | None) -> list[ControllerSourceItem]:
+        """Return controller-facing list of sources."""
+        items: list["ControllerSourceItem"] = []
+        for source_id in sorted(self._sources.keys()):
+            source = self._sources[source_id]
+            items.append(source.build_controller_item(selected=source_id == selected_source_id))
+        return items
+
+    def has_sources(self) -> bool:
+        """Return True if any sources are registered."""
+        return bool(self._sources)
+
+    def handle_source_audio(self, client: SendspinClient, timestamp_us: int, data: bytes) -> None:
+        """Handle an incoming source audio frame."""
+        source = client.source
+        if source is None:
+            return
+        if client.group.selected_source_id != client.client_id:
+            return
+        if source.state != SourceStateType.STREAMING:
+            return
+        support = source.support
+        if support is None:
+            return
+        if support.format.codec is not AudioCodec.PCM:
+            logger.warning(
+                "Source %s uses unsupported codec %s", client.client_id, support.format.codec
+            )
+            return
+
+        frame_stride = support.format.channels * (support.format.bit_depth // 8)
+        if frame_stride <= 0 or len(data) % frame_stride:
+            logger.warning("Dropping misaligned PCM chunk from source %s", client.client_id)
+            return
+
+        session = self._source_streams.get(client.group.group_id)
+        if session is None or session.source_id != client.client_id:
+            session = self._start_source_stream_session(client, timestamp_us)
+            if session is None:
+                return
+        session.enqueue(data)
+
+    def _start_source_stream_session(
+        self, client: SendspinClient, start_time_us: int
+    ) -> SourceStreamSession | None:
+        """Start source playback for a group."""
+        source = client.source
+        if source is None or source.support is None:
+            return None
+        group = client.group
+        if not group.players():
+            logger.info("No players available for source %s; dropping audio", client.client_id)
+            return None
+
+        audio_format = AudioFormat(
+            sample_rate=source.support.format.sample_rate,
+            bit_depth=source.support.format.bit_depth,
+            channels=source.support.format.channels,
+            codec=AudioCodec.PCM,
+        )
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        media_stream = build_source_media_stream(queue, audio_format)
+        end_event = asyncio.Event()
+        session = SourceStreamSession(
+            source_id=client.client_id,
+            audio_format=audio_format,
+            queue=queue,
+            media_stream=media_stream,
+            end_event=end_event,
+        )
+        self._source_streams[group.group_id] = session
+
+        async def _run() -> int:
+            try:
+                await group.stop()
+                return await group.play_media(media_stream, play_start_time_us=start_time_us)
+            finally:
+                end_event.set()
+
+        session.play_task = self._loop.create_task(_run())
+        return session
+
+    def stop_source_stream(self, group: "SendspinGroup") -> None:
+        """Stop the active source stream for the given group."""
+        session = self._source_streams.pop(group.group_id, None)
+        if session is None:
+            return
+        session.close()
+        if group._media_stream is session.media_stream:  # noqa: SLF001
+            self._loop.create_task(group.stop())
+
+    def has_active_source_stream(self, group: "SendspinGroup") -> bool:
+        """Return True if the group currently plays a source stream."""
+        session = self._source_streams.get(group.group_id)
+        return session is not None and not session.end_event.is_set()
+
+    def source_stream_end_event(self, group: "SendspinGroup") -> asyncio.Event | None:
+        """Return an event that signals the end of a source stream for a group."""
+        session = self._source_streams.get(group.group_id)
+        return session.end_event if session is not None else None
+
+    def _notify_controller_sources_changed(self) -> None:
+        """Push updated controller state to all controller clients."""
+        for group in self._iter_groups():
+            group._send_controller_state_to_clients()  # noqa: SLF001
 
     @property
     def clients(self) -> set[SendspinClient]:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import ClientWebSocketResponse, WSMsgType, web
 
-from aiosendspin.models import unpack_binary_header
+from aiosendspin.models import BINARY_HEADER_SIZE, unpack_binary_header
 from aiosendspin.models.core import (
     ClientCommandMessage,
     ClientGoodbyeMessage,
@@ -42,6 +42,7 @@ from .events import ClientEvent, ClientGroupChangedEvent
 from .group import SendspinGroup
 from .metadata import MetadataClient
 from .player import PlayerClient
+from .source import SourceClient
 from .visualizer import VisualizerClient
 
 MAX_PENDING_MSG = 4096
@@ -133,6 +134,7 @@ class SendspinClient:
     _controller: ControllerClient | None = None
     _metadata_client: MetadataClient | None = None
     _visualizer: VisualizerClient | None = None
+    _source: SourceClient | None = None
     _client_state: ClientStateType
     """Current operational state of the client."""
     _previous_group_id: str | None = None
@@ -342,9 +344,21 @@ class SendspinClient:
             raise ValueError(f"Client does not support role: {Roles.VISUALIZER}")
         return self._visualizer
 
+    @property
+    def source(self) -> SourceClient | None:
+        """Return the source role helper, if initialized."""
+        return self._source
+
+    @property
+    def require_source(self) -> SourceClient:
+        """Return source helper or raise if role unsupported."""
+        if self._source is None:
+            raise ValueError(f"Client does not support role: {Roles.SOURCE}")
+        return self._source
+
     def requires_initial_state(self) -> bool:
         """Check if this client's roles require sending initial state."""
-        return Roles.PLAYER in self._roles
+        return Roles.PLAYER in self._roles or Roles.SOURCE in self._roles
 
     def _initial_state_timeout_callback(self) -> None:
         """
@@ -437,17 +451,39 @@ class SendspinClient:
                     break
 
                 if msg.type == WSMsgType.BINARY:
-                    # Per spec, clients should not send binary messages
-                    # Binary messages should be rejected if there is no active stream
-                    if not self._group.has_active_stream:
-                        self._logger.warning(
-                            "Received binary message from client with no active stream, rejecting"
+                    if self._source is not None:
+                        try:
+                            header = unpack_binary_header(msg.data)
+                        except Exception:
+                            self._logger.exception("Failed to unpack binary header from source")
+                            continue
+
+                        if header.message_type != BinaryMessageType.SOURCE_AUDIO_CHUNK.value:
+                            self._logger.warning(
+                                "Received unexpected binary message type %s from source",
+                                header.message_type,
+                            )
+                            continue
+
+                        accepted = self._source.handle_audio_chunk(
+                            header.timestamp_us, msg.data[BINARY_HEADER_SIZE:]
                         )
+                        if accepted:
+                            self._server.handle_source_audio(
+                                self, header.timestamp_us, msg.data[BINARY_HEADER_SIZE:]
+                            )
                     else:
-                        self._logger.warning(
-                            "Received binary message from client "
-                            "(clients should not send binary data)"
-                        )
+                        # Per spec, clients should not send binary messages
+                        # Binary messages should be rejected if there is no active stream
+                        if not self._group.has_active_stream:
+                            self._logger.warning(
+                                "Received binary message from client with no active stream, rejecting"
+                            )
+                        else:
+                            self._logger.warning(
+                                "Received binary message from client "
+                                "(clients should not send binary data)"
+                            )
                     continue
 
                 if msg.type != WSMsgType.TEXT:
@@ -544,6 +580,9 @@ class SendspinClient:
                     self._metadata_client = MetadataClient(self)
                 if Roles.VISUALIZER in self._roles:
                     self._visualizer = VisualizerClient(self)
+                if Roles.SOURCE in self._roles:
+                    self._source = SourceClient(self)
+                    self._server.register_source(self)
 
                 self._logger.debug("Sending server/hello in response to client/hello")
                 self.send_message(
@@ -617,12 +656,17 @@ class SendspinClient:
 
                 if payload.player:
                     self.require_player.handle_player_update(payload.player)
+                if payload.source and self._source is not None:
+                    self._source.update_state(payload.source)
+                    self._server.update_source_state(self, payload.source)
             case StreamRequestFormatMessage(payload):
                 await self.group.handle_stream_format_request(self, payload)
             # Controller messages
             case ClientCommandMessage(payload):
                 if payload.controller:
                     await self.require_controller.handle_command(payload.controller)
+                if payload.source and self._source is not None:
+                    self._source.handle_client_command(payload.source)
             # Goodbye message (multi-server support)
             case ClientGoodbyeMessage(payload):
                 self._logger.info("Received client/goodbye with reason: %s", payload.reason)
