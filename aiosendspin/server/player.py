@@ -26,6 +26,7 @@ class PlayerClient:
     client: SendspinClient
     _volume: int = 100
     _muted: bool = False
+    _static_delay_ms: float = 0.0
 
     def __init__(self, client: SendspinClient) -> None:
         """Initialize player wrapper for a client."""
@@ -96,6 +97,27 @@ class PlayerClient:
                     player=PlayerCommandPayload(
                         command=PlayerCommand.MUTE,
                         mute=False,
+                    )
+                )
+            )
+        )
+
+    def set_static_delay_ms(self, delay_ms: float) -> None:
+        """Set the static playback delay for this player."""
+        if not self.support or PlayerCommand.STATIC_DELAY not in self.support.supported_commands:
+            self._logger.warning("Player does not support the 'static_delay' command")
+            return
+
+        self._logger.debug(
+            "Setting static delay from %.1f ms to %.1f ms", self._static_delay_ms, delay_ms
+        )
+        self._static_delay_ms = delay_ms
+        self.client.send_message(
+            ServerCommandMessage(
+                payload=ServerCommandPayload(
+                    player=PlayerCommandPayload(
+                        command=PlayerCommand.STATIC_DELAY,
+                        static_delay_ms=delay_ms,
                     )
                 )
             )

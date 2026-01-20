@@ -50,7 +50,7 @@ class ClientHelloPlayerSupport(DataClassORJSONMixin):
     buffer_capacity: int
     """Max size in bytes of compressed audio messages in the buffer that are yet to be played."""
     supported_commands: list[PlayerCommand]
-    """Subset of: 'volume', 'mute'."""
+    """Subset of: 'volume', 'mute', 'static_delay'."""
 
     def __post_init__(self) -> None:
         """Validate field values."""
@@ -99,13 +99,15 @@ class PlayerCommandPayload(DataClassORJSONMixin):
 
     command: PlayerCommand
     """
-    Command - must be 'volume' or 'mute', and must be one of the values
+    Command - must be 'volume', 'mute', or 'static_delay', and must be one of the values
     listed in supported_commands from player_support in client/hello.
     """
     volume: int | None = None
     """Volume range 0-100, only set if command is volume."""
     mute: bool | None = None
     """True to mute, false to unmute, only set if command is mute."""
+    static_delay_ms: float | None = None
+    """Static playback delay in milliseconds, only set if command is static_delay."""
 
     def __post_init__(self) -> None:
         """Validate field values and command consistency."""
@@ -122,6 +124,14 @@ class PlayerCommandPayload(DataClassORJSONMixin):
                 raise ValueError("Mute must be provided when command is 'mute'")
         elif self.mute is not None:
             raise ValueError(f"Mute should not be provided for command '{self.command.value}'")
+
+        if self.command == PlayerCommand.STATIC_DELAY:
+            if self.static_delay_ms is None:
+                raise ValueError("static_delay_ms must be provided when command is 'static_delay'")
+        elif self.static_delay_ms is not None:
+            raise ValueError(
+                f"static_delay_ms should not be provided for command '{self.command.value}'"
+            )
 
     class Config(BaseConfig):
         """Config for parsing json messages."""
