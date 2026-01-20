@@ -22,7 +22,9 @@ from aiosendspin.models.source import (
     SourceCommandPayload,
     SourceFeatures,
     SourceFormat,
+    SourceFormatHint,
     SourceStatePayload,
+    SourceVadSettings,
 )
 from aiosendspin.models.types import (
     AudioCodec,
@@ -93,6 +95,38 @@ def test_source_command_roundtrip() -> None:
     assert parsed.payload.source.command == SourceCommand.START
 
 
+def test_source_command_vad_roundtrip() -> None:
+    payload = ServerCommandPayload(
+        source=SourceCommandPayload(
+            vad=SourceVadSettings(threshold_db=-45.0, hold_ms=2000)
+        )
+    )
+    message = ServerCommandMessage(payload=payload)
+    parsed = ServerMessage.from_json(message.to_json())
+    assert isinstance(parsed, ServerCommandMessage)
+    assert parsed.payload.source is not None
+    assert parsed.payload.source.command is None
+    assert parsed.payload.source.vad is not None
+    assert parsed.payload.source.vad.threshold_db == -45.0
+
+
+def test_source_command_partial_hints_roundtrip() -> None:
+    payload = ServerCommandPayload(
+        source=SourceCommandPayload(
+            format=SourceFormatHint(sample_rate=44100),
+            vad=SourceVadSettings(hold_ms=1500),
+        )
+    )
+    message = ServerCommandMessage(payload=payload)
+    parsed = ServerMessage.from_json(message.to_json())
+    assert isinstance(parsed, ServerCommandMessage)
+    assert parsed.payload.source is not None
+    assert parsed.payload.source.command is None
+    assert parsed.payload.source.format is not None
+    assert parsed.payload.source.format.sample_rate == 44100
+    assert parsed.payload.source.format.channels is None
+    assert parsed.payload.source.vad is not None
+    assert parsed.payload.source.vad.hold_ms == 1500
 def test_source_client_command_roundtrip() -> None:
     payload = ClientCommandPayload(
         source=SourceClientCommandPayload(command=SourceClientCommand.STARTED)

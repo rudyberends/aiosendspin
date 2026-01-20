@@ -19,6 +19,7 @@ __all__ = [
     "Roles",
     "SourceCommand",
     "SourceClientCommand",
+    "SourceFormatHint",
     "SourceSignalType",
     "SourceStateType",
     "SourceVadSettings",
@@ -42,7 +43,7 @@ from typing import NamedTuple
 
 from . import artwork, controller, core, metadata, player, source, types, visualizer
 from .core import DeviceInfo
-from .source import SourceVadSettings
+from .source import SourceFormatHint, SourceVadSettings
 from .types import (
     AudioCodec,
     BinaryMessageType,

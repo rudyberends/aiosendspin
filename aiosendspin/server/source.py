@@ -11,6 +11,7 @@ from aiosendspin.models.source import (
     SourceClientCommandPayload,
     SourceCommandPayload,
     SourceFormat,
+    SourceFormatHint,
     SourceStatePayload,
     SourceVadSettings,
 )
@@ -84,7 +85,7 @@ class SourceClient:
         self,
         command: SourceCommand,
         *,
-        format: SourceFormat | None = None,
+        format: SourceFormat | SourceFormatHint | None = None,
         vad: SourceVadSettings | None = None,
     ) -> None:
         """Send a source command to the client."""

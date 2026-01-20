@@ -39,6 +39,25 @@ class SourceFormat(DataClassORJSONMixin):
 
 
 @dataclass
+class SourceFormatHint(DataClassORJSONMixin):
+    """Partial audio format hint for a source stream."""
+
+    codec: AudioCodec | None = None
+    """Codec identifier."""
+    channels: int | None = None
+    """Number of channels (e.g., 1 = mono, 2 = stereo)."""
+    sample_rate: int | None = None
+    """Sample rate in Hz (e.g., 44100, 48000)."""
+    bit_depth: int | None = None
+    """Bit depth for this format (e.g., 16, 24)."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
 class SourceFeatures(DataClassORJSONMixin):
     """Source feature hints."""
 
@@ -97,10 +116,15 @@ class SourceStatePayload(DataClassORJSONMixin):
 class SourceVadSettings(DataClassORJSONMixin):
     """Voice activity detection settings."""
 
-    threshold_db: float
+    threshold_db: float | None = None
     """Signal threshold in dB."""
-    hold_ms: int
+    hold_ms: int | None = None
     """Hold time in milliseconds."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
 
 
 # Server -> Client: server/command source object
@@ -108,9 +132,9 @@ class SourceVadSettings(DataClassORJSONMixin):
 class SourceCommandPayload(DataClassORJSONMixin):
     """Source object in server/command message."""
 
-    command: SourceCommand
+    command: SourceCommand | None = None
     """Source command (start/stop)."""
-    format: SourceFormat | None = None
+    format: SourceFormatHint | SourceFormat | None = None
     """Optional format hint for the source."""
     vad: SourceVadSettings | None = None
     """Optional VAD settings hint for the source."""
