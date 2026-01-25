@@ -436,13 +436,16 @@ class SendspinServer:
         support = source.support
         if support is None:
             return
-        if support.format.codec is not AudioCodec.PCM:
+        preferred_format = support.supported_formats[0]
+        if preferred_format.codec is not AudioCodec.PCM:
             logger.warning(
-                "Source %s uses unsupported codec %s", client.client_id, support.format.codec
+                "Source %s uses unsupported codec %s",
+                client.client_id,
+                preferred_format.codec,
             )
             return
 
-        frame_stride = support.format.channels * (support.format.bit_depth // 8)
+        frame_stride = preferred_format.channels * (preferred_format.bit_depth // 8)
         if frame_stride <= 0 or len(data) % frame_stride:
             logger.warning("Dropping misaligned PCM chunk from source %s", client.client_id)
             return
@@ -466,10 +469,11 @@ class SendspinServer:
             logger.info("No players available for source %s; dropping audio", client.client_id)
             return None
 
+        preferred_format = source.support.supported_formats[0]
         audio_format = AudioFormat(
-            sample_rate=source.support.format.sample_rate,
-            bit_depth=source.support.format.bit_depth,
-            channels=source.support.format.channels,
+            sample_rate=preferred_format.sample_rate,
+            bit_depth=preferred_format.bit_depth,
+            channels=preferred_format.channels,
             codec=AudioCodec.PCM,
         )
         queue: asyncio.Queue[bytes | None] = asyncio.Queue()

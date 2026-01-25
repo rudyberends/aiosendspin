@@ -38,12 +38,14 @@ async def test_source_flow_select_start_stop() -> None:
     url = f"ws://127.0.0.1:{port}{SendspinServer.API_PATH}"
 
     source_support = ClientHelloSourceSupport(
-        format=SourceFormat(
-            codec=AudioCodec.PCM,
-            channels=1,
-            sample_rate=48000,
-            bit_depth=16,
-        ),
+        supported_formats=[
+            SourceFormat(
+                codec=AudioCodec.PCM,
+                channels=1,
+                sample_rate=48000,
+                bit_depth=16,
+            )
+        ],
     )
 
     source_client = SendspinClient(
@@ -144,12 +146,14 @@ async def test_source_vad_hint_roundtrip() -> None:
     url = f"ws://127.0.0.1:{port}{SendspinServer.API_PATH}"
 
     source_support = ClientHelloSourceSupport(
-        format=SourceFormat(
-            codec=AudioCodec.PCM,
-            channels=1,
-            sample_rate=48000,
-            bit_depth=16,
-        ),
+        supported_formats=[
+            SourceFormat(
+                codec=AudioCodec.PCM,
+                channels=1,
+                sample_rate=48000,
+                bit_depth=16,
+            )
+        ],
     )
 
     source_client = SendspinClient(

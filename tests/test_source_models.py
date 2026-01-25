@@ -46,12 +46,14 @@ def test_source_hello_roundtrip() -> None:
         version=1,
         supported_roles=[Roles.SOURCE],
         source_support=ClientHelloSourceSupport(
-            format=SourceFormat(
-                codec=AudioCodec.PCM,
-                channels=2,
-                sample_rate=48000,
-                bit_depth=16,
-            ),
+            supported_formats=[
+                SourceFormat(
+                    codec=AudioCodec.PCM,
+                    channels=2,
+                    sample_rate=48000,
+                    bit_depth=16,
+                )
+            ],
             features=SourceFeatures(level=True, line_sense=True),
         ),
     )
@@ -188,12 +190,14 @@ def test_source_support_json_shape() -> None:
         version=1,
         supported_roles=[Roles.SOURCE],
         source_support=ClientHelloSourceSupport(
-            format=SourceFormat(
-                codec=AudioCodec.PCM,
-                channels=2,
-                sample_rate=48000,
-                bit_depth=16,
-            ),
+            supported_formats=[
+                SourceFormat(
+                    codec=AudioCodec.PCM,
+                    channels=2,
+                    sample_rate=48000,
+                    bit_depth=16,
+                )
+            ],
             features=SourceFeatures(level=True, line_sense=False),
         ),
     )

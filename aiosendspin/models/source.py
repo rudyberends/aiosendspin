@@ -77,10 +77,15 @@ class SourceFeatures(DataClassORJSONMixin):
 class ClientHelloSourceSupport(DataClassORJSONMixin):
     """Source support configuration - only if source role is set."""
 
-    format: SourceFormat
-    """Preferred source format."""
+    supported_formats: list[SourceFormat]
+    """List of supported formats in priority order (first is preferred)."""
     features: SourceFeatures | None = None
     """Optional feature hints."""
+
+    def __post_init__(self) -> None:
+        """Validate field values."""
+        if not self.supported_formats:
+            raise ValueError("supported_formats cannot be empty")
 
     class Config(BaseConfig):
         """Config for parsing json messages."""
