@@ -181,7 +181,6 @@ class MediaCommand(Enum):
     SHUFFLE = "shuffle"
     UNSHUFFLE = "unshuffle"
     SWITCH = "switch"
-    SELECT_SOURCE = "select_source"
 
 
 class SourceCommand(Enum):

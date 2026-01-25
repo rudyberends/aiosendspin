@@ -129,6 +129,8 @@ def test_source_command_partial_hints_roundtrip() -> None:
     assert parsed.payload.source.format.channels is None
     assert parsed.payload.source.vad is not None
     assert parsed.payload.source.vad.hold_ms == 1500
+
+
 def test_source_client_command_roundtrip() -> None:
     payload = ClientCommandPayload(
         source=SourceClientCommandPayload(command=SourceClientCommand.STARTED)
@@ -140,27 +142,9 @@ def test_source_client_command_roundtrip() -> None:
     assert parsed.payload.source.command == SourceClientCommand.STARTED
 
 
-def test_controller_select_source_roundtrip() -> None:
-    payload = ControllerCommandPayload(command=MediaCommand.SELECT_SOURCE, source_id="source-1")
-    message = ClientCommandMessage(payload=ClientCommandPayload(controller=payload))
-    parsed = ClientMessage.from_json(message.to_json())
-    assert isinstance(parsed, ClientCommandMessage)
-    assert parsed.payload.controller is not None
-    assert parsed.payload.controller.source_id == "source-1"
-
-
-def test_controller_clear_source_roundtrip() -> None:
-    payload = ControllerCommandPayload(command=MediaCommand.SELECT_SOURCE, source_id=None)
-    message = ClientCommandMessage(payload=ClientCommandPayload(controller=payload))
-    parsed = ClientMessage.from_json(message.to_json())
-    assert isinstance(parsed, ClientCommandMessage)
-    assert parsed.payload.controller is not None
-    assert parsed.payload.controller.source_id is None
-
-
 def test_controller_sources_roundtrip() -> None:
     controller_payload = ControllerStatePayload(
-        supported_commands=[MediaCommand.SELECT_SOURCE],
+        supported_commands=[MediaCommand.VOLUME],
         volume=10,
         muted=False,
         sources=[

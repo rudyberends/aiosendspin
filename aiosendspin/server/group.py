@@ -1275,8 +1275,6 @@ class SendspinGroup:
             MediaCommand.MUTE,
             MediaCommand.SWITCH,
         ]
-        if self._server.has_sources():
-            protocol_commands.append(MediaCommand.SELECT_SOURCE)
 
         if self._supported_commands:
             # Return union of protocol commands and app-declared commands

@@ -14,7 +14,6 @@ from aiosendspin.models.source import (
 )
 from aiosendspin.models.types import (
     AudioCodec,
-    MediaCommand,
     Roles,
     SourceCommand,
     SourceSignalType,
@@ -54,24 +53,8 @@ async def test_source_flow_select_start_stop() -> None:
         roles=[Roles.SOURCE],
         source_support=source_support,
     )
-    controller_client = SendspinClient(
-        client_id="controller-1",
-        client_name="Controller One",
-        roles=[Roles.CONTROLLER],
-    )
-
-    sources_event = asyncio.Event()
-    selected_event = asyncio.Event()
     command_event = asyncio.Event()
     stop_event = asyncio.Event()
-
-    def _on_controller_state(payload) -> None:
-        if payload.controller and payload.controller.sources is not None:
-            for source in payload.controller.sources:
-                if source.id == "source-1":
-                    sources_event.set()
-                    if source.selected:
-                        selected_event.set()
 
     def _on_source_command(payload) -> None:
         if payload.command == SourceCommand.START:
@@ -79,7 +62,6 @@ async def test_source_flow_select_start_stop() -> None:
         elif payload.command == SourceCommand.STOP:
             stop_event.set()
 
-    controller_client.add_controller_state_listener(_on_controller_state)
     source_client.add_source_command_listener(_on_source_command)
 
     await source_client.connect(url)
@@ -89,14 +71,14 @@ async def test_source_flow_select_start_stop() -> None:
             signal=SourceSignalType.ABSENT,
         )
     )
-    await controller_client.connect(url)
-
-    await asyncio.wait_for(sources_event.wait(), timeout=5)
-
-    await controller_client.send_group_command(
-        MediaCommand.SELECT_SOURCE, source_id="source-1"
-    )
-    await asyncio.wait_for(selected_event.wait(), timeout=5)
+    server_client = None
+    for _ in range(50):
+        server_client = server.get_client("source-1")
+        if server_client is not None:
+            break
+        await asyncio.sleep(0.05)
+    assert server_client is not None
+    server_client.group.select_source("source-1", notify=False)
     await asyncio.wait_for(command_event.wait(), timeout=5)
 
     await source_client.send_source_state(
@@ -115,7 +97,7 @@ async def test_source_flow_select_start_stop() -> None:
     frames_received = server._sources["source-1"].frames_received  # noqa: SLF001
     assert frames_received == 1
 
-    await controller_client.send_group_command(MediaCommand.SELECT_SOURCE, source_id=None)
+    server_client.group.select_source(None, notify=False)
     await asyncio.wait_for(stop_event.wait(), timeout=5)
 
     await source_client.send_source_state(
@@ -133,7 +115,6 @@ async def test_source_flow_select_start_stop() -> None:
     assert server._sources["source-1"].frames_received == frames_received  # noqa: SLF001
 
     await source_client.disconnect()
-    await controller_client.disconnect()
     await server.close()
 
 
