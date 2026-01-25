@@ -26,7 +26,7 @@ from aiosendspin.util import get_local_ip
 
 from .client import SendspinClient
 from .source import SourceClient
-from .source_stream import SourceStreamSession, build_source_media_stream
+from .source_stream import SourceDecoder, SourceStreamSession, build_source_media_stream
 from .stream import AudioFormat
 
 logger = logging.getLogger(__name__)
@@ -436,25 +436,43 @@ class SendspinServer:
         stream_format = source.input_stream_format
         if stream_format is None:
             return
-        if stream_format.codec is not AudioCodec.PCM:
-            logger.warning(
-                "Source %s uses unsupported codec %s",
-                client.client_id,
-                stream_format.codec,
-            )
-            return
-
-        frame_stride = stream_format.channels * (stream_format.bit_depth // 8)
-        if frame_stride <= 0 or len(data) % frame_stride:
-            logger.warning("Dropping misaligned PCM chunk from source %s", client.client_id)
-            return
-
         session = self._source_streams.get(client.group.group_id)
         if session is None or session.source_id != client.client_id:
             session = self._start_source_stream_session(client, timestamp_us)
             if session is None:
                 return
-        session.enqueue(data)
+        if stream_format.codec is AudioCodec.PCM:
+            frame_stride = stream_format.channels * (stream_format.bit_depth // 8)
+            if frame_stride <= 0 or len(data) % frame_stride:
+                logger.warning("Dropping misaligned PCM chunk from source %s", client.client_id)
+                return
+            session.enqueue(data)
+            return
+
+        if session.decoder is None:
+            if source.input_stream_codec_header is None:
+                logger.warning(
+                    "Missing codec header for source %s (%s)",
+                    client.client_id,
+                    stream_format.codec.value,
+                )
+                return
+            session.decoder = SourceDecoder(
+                codec=stream_format.codec,
+                audio_format=session.audio_format,
+                codec_header=source.input_stream_codec_header,
+            )
+        try:
+            pcm_chunks = session.decoder.decode(data)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to decode %s frame from source %s",
+                stream_format.codec.value,
+                client.client_id,
+            )
+            return
+        for pcm_chunk in pcm_chunks:
+            session.enqueue(pcm_chunk)
 
     def _start_source_stream_session(
         self, client: SendspinClient, start_time_us: int
