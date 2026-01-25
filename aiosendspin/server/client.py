@@ -19,6 +19,8 @@ from aiosendspin.models.core import (
     ClientTimeMessage,
     GroupUpdateServerMessage,
     GroupUpdateServerPayload,
+    InputStreamEndMessage,
+    InputStreamStartMessage,
     ServerHelloMessage,
     ServerHelloPayload,
     ServerTimeMessage,
@@ -659,6 +661,14 @@ class SendspinClient:
                 if payload.source and self._source is not None:
                     self._source.update_state(payload.source)
                     self._server.update_source_state(self, payload.source)
+            case InputStreamStartMessage(payload):
+                if self._source is not None:
+                    self._source.handle_input_stream_start(payload.source)
+            case InputStreamEndMessage():
+                if self._source is not None:
+                    self._source.handle_input_stream_end()
+                    if self.group.selected_source_id == self.client_id:
+                        self._server.stop_source_stream(self.group)
             case StreamRequestFormatMessage(payload):
                 await self.group.handle_stream_format_request(self, payload)
             # Controller messages

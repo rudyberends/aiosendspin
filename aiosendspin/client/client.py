@@ -24,6 +24,11 @@ from aiosendspin.models.core import (
     ClientCommandPayload,
     ClientHelloMessage,
     ClientHelloPayload,
+    InputStreamEndMessage,
+    InputStreamEndPayload,
+    InputStreamRequestFormatMessage,
+    InputStreamStartMessage,
+    InputStreamStartPayload,
     ClientStateMessage,
     ClientStatePayload,
     ClientTimeMessage,
@@ -50,6 +55,8 @@ from aiosendspin.models.player import (
 )
 from aiosendspin.models.source import (
     ClientHelloSourceSupport,
+    InputStreamRequestFormatSource,
+    InputStreamStartSource,
     SourceClientCommandPayload,
     SourceCommandPayload,
     SourceStatePayload,
@@ -144,6 +151,9 @@ ServerCommandCallback = Callable[[ServerCommandPayload], None]
 # Callback invoked when server sends source commands (start/stop).
 SourceCommandCallback = Callable[[SourceCommandPayload], None]
 
+# Callback invoked when server requests input stream format changes.
+InputStreamRequestFormatCallback = Callable[[InputStreamRequestFormatSource], None]
+
 
 @dataclass(slots=True)
 class ServerInfo:
@@ -237,6 +247,8 @@ class SendspinClient:
     """Callbacks invoked when server sends player commands."""
     _source_command_callbacks: list[SourceCommandCallback]
     """Callbacks invoked when server sends source commands."""
+    _input_stream_request_format_callbacks: list[InputStreamRequestFormatCallback]
+    """Callbacks invoked when server requests input stream format changes."""
 
     _initial_volume: int
     """Initial volume level for player role (0-100)."""
@@ -338,6 +350,7 @@ class SendspinClient:
         self._disconnect_callbacks = []
         self._server_command_callbacks = []
         self._source_command_callbacks = []
+        self._input_stream_request_format_callbacks = []
 
     @property
     def server_info(self) -> ServerInfo | None:
@@ -510,6 +523,22 @@ class SendspinClient:
         message = ClientCommandMessage(payload=controller_payload)
         await self._send_message(message.to_json())
 
+    async def send_input_stream_start(self, source: InputStreamStartSource) -> None:
+        """Send input_stream/start with source format details."""
+        if not self.connected:
+            raise RuntimeError("Client is not connected")
+        message = InputStreamStartMessage(
+            payload=InputStreamStartPayload(source=source)
+        )
+        await self._send_message(message.to_json())
+
+    async def send_input_stream_end(self) -> None:
+        """Send input_stream/end to stop the input stream."""
+        if not self.connected:
+            raise RuntimeError("Client is not connected")
+        message = InputStreamEndMessage(payload=InputStreamEndPayload())
+        await self._send_message(message.to_json())
+
     async def send_source_audio_chunk(
         self,
         audio_data: bytes,
@@ -669,6 +698,17 @@ class SendspinClient:
             else None
         )
 
+    def add_input_stream_request_format_listener(
+        self, callback: InputStreamRequestFormatCallback
+    ) -> Callable[[], None]:
+        """Add a listener for input_stream/request-format events."""
+        self._input_stream_request_format_callbacks.append(callback)
+        return lambda: (
+            self._input_stream_request_format_callbacks.remove(callback)
+            if callback in self._input_stream_request_format_callbacks
+            else None
+        )
+
     def is_time_synchronized(self) -> bool:
         """Return whether time synchronization with the server has converged."""
         return self._time_filter.is_synchronized
@@ -758,6 +798,8 @@ class SendspinClient:
                 self._handle_server_state(payload)
             case ServerCommandMessage(payload=payload):
                 self._handle_server_command(payload)
+            case InputStreamRequestFormatMessage(payload=payload):
+                self._notify_input_stream_request_format(payload.source)
             case _:
                 logger.debug("Unhandled server message type: %s", type(message).__name__)
 
@@ -1020,6 +1062,17 @@ class SendspinClient:
                 callback(payload)
             except Exception:
                 logger.exception("Error in source command callback %s", callback)
+
+    def _notify_input_stream_request_format(
+        self, payload: InputStreamRequestFormatSource
+    ) -> None:
+        for callback in list(self._input_stream_request_format_callbacks):
+            try:
+                callback(payload)
+            except Exception:
+                logger.exception(
+                    "Error in input stream request-format callback %s", callback
+                )
 
     async def _time_sync_loop(self) -> None:
         try:

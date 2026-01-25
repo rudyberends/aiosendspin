@@ -32,6 +32,8 @@ from .player import (
 )
 from .source import (
     ClientHelloSourceSupport,
+    InputStreamRequestFormatSource,
+    InputStreamStartSource,
     SourceClientCommandPayload,
     SourceCommandPayload,
     SourceStatePayload,
@@ -510,3 +512,66 @@ class StreamEndMessage(ServerMessage):
 
     payload: StreamEndPayload
     type: Literal["stream/end"] = "stream/end"
+
+
+# Client -> Server: input_stream/start
+@dataclass
+class InputStreamStartPayload(DataClassORJSONMixin):
+    """Payload for input_stream/start message."""
+
+    source: InputStreamStartSource
+    """Source stream format information."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
+class InputStreamStartMessage(ClientMessage):
+    """Message sent by the client to start an input stream."""
+
+    payload: InputStreamStartPayload
+    type: Literal["input_stream/start"] = "input_stream/start"
+
+
+# Server -> Client: input_stream/request-format
+@dataclass
+class InputStreamRequestFormatPayload(DataClassORJSONMixin):
+    """Payload for input_stream/request-format message."""
+
+    source: InputStreamRequestFormatSource
+    """Requested source stream format."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
+class InputStreamRequestFormatMessage(ServerMessage):
+    """Message sent by the server to request an input stream format change."""
+
+    payload: InputStreamRequestFormatPayload
+    type: Literal["input_stream/request-format"] = "input_stream/request-format"
+
+
+# Client -> Server: input_stream/end
+@dataclass
+class InputStreamEndPayload(DataClassORJSONMixin):
+    """Payload for input_stream/end message."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
+class InputStreamEndMessage(ClientMessage):
+    """Message sent by the client to end an input stream."""
+
+    payload: InputStreamEndPayload
+    type: Literal["input_stream/end"] = "input_stream/end"

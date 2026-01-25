@@ -58,6 +58,55 @@ class SourceFormatHint(DataClassORJSONMixin):
 
 
 @dataclass
+class InputStreamStartSource(DataClassORJSONMixin):
+    """Source object in input_stream/start message."""
+
+    codec: AudioCodec
+    """Codec identifier."""
+    channels: int
+    """Number of channels (e.g., 1 = mono, 2 = stereo)."""
+    sample_rate: int
+    """Sample rate in Hz (e.g., 44100, 48000)."""
+    bit_depth: int
+    """Bit depth for this format (e.g., 16, 24)."""
+    codec_header: str | None = None
+    """Base64 encoded codec header (if necessary; e.g., FLAC/Opus)."""
+
+    def __post_init__(self) -> None:
+        """Validate field values."""
+        if self.channels <= 0:
+            raise ValueError(f"channels must be positive, got {self.channels}")
+        if self.sample_rate <= 0:
+            raise ValueError(f"sample_rate must be positive, got {self.sample_rate}")
+        if self.bit_depth <= 0:
+            raise ValueError(f"bit_depth must be positive, got {self.bit_depth}")
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
+class InputStreamRequestFormatSource(DataClassORJSONMixin):
+    """Source object in input_stream/request-format message."""
+
+    codec: AudioCodec | None = None
+    """Requested codec identifier."""
+    channels: int | None = None
+    """Requested number of channels."""
+    sample_rate: int | None = None
+    """Requested sample rate in Hz."""
+    bit_depth: int | None = None
+    """Requested bit depth."""
+
+    class Config(BaseConfig):
+        """Config for parsing json messages."""
+
+        omit_none = True
+
+
+@dataclass
 class SourceFeatures(DataClassORJSONMixin):
     """Source feature hints."""
 
@@ -139,8 +188,6 @@ class SourceCommandPayload(DataClassORJSONMixin):
 
     command: SourceCommand | None = None
     """Source command (start/stop)."""
-    format: SourceFormatHint | SourceFormat | None = None
-    """Optional format hint for the source."""
     vad: SourceVadSettings | None = None
     """Optional VAD settings hint for the source."""
 

@@ -8,6 +8,12 @@ from aiosendspin.models.core import (
     ClientCommandPayload,
     ClientHelloMessage,
     ClientHelloPayload,
+    InputStreamEndMessage,
+    InputStreamEndPayload,
+    InputStreamRequestFormatMessage,
+    InputStreamRequestFormatPayload,
+    InputStreamStartMessage,
+    InputStreamStartPayload,
     ClientStateMessage,
     ClientStatePayload,
     ServerCommandMessage,
@@ -18,11 +24,12 @@ from aiosendspin.models.core import (
 from aiosendspin.models.source import (
     ClientHelloSourceSupport,
     ControllerSourceItem,
+    InputStreamRequestFormatSource,
+    InputStreamStartSource,
     SourceClientCommandPayload,
     SourceCommandPayload,
     SourceFeatures,
     SourceFormat,
-    SourceFormatHint,
     SourceStatePayload,
     SourceVadSettings,
 )
@@ -82,12 +89,6 @@ def test_source_command_roundtrip() -> None:
     payload = ServerCommandPayload(
         source=SourceCommandPayload(
             command=SourceCommand.START,
-            format=SourceFormat(
-                codec=AudioCodec.OPUS,
-                channels=1,
-                sample_rate=48000,
-                bit_depth=16,
-            ),
         )
     )
     message = ServerCommandMessage(payload=payload)
@@ -112,23 +113,37 @@ def test_source_command_vad_roundtrip() -> None:
     assert parsed.payload.source.vad.threshold_db == -45.0
 
 
-def test_source_command_partial_hints_roundtrip() -> None:
-    payload = ServerCommandPayload(
-        source=SourceCommandPayload(
-            format=SourceFormatHint(sample_rate=44100),
-            vad=SourceVadSettings(hold_ms=1500),
+def test_input_stream_start_roundtrip() -> None:
+    payload = InputStreamStartPayload(
+        source=InputStreamStartSource(
+            codec=AudioCodec.OPUS,
+            channels=2,
+            sample_rate=48000,
+            bit_depth=16,
+            codec_header="AQIDBA==",
         )
     )
-    message = ServerCommandMessage(payload=payload)
+    message = InputStreamStartMessage(payload=payload)
+    parsed = ClientMessage.from_json(message.to_json())
+    assert isinstance(parsed, InputStreamStartMessage)
+    assert parsed.payload.source.codec == AudioCodec.OPUS
+    assert parsed.payload.source.codec_header == "AQIDBA=="
+
+
+def test_input_stream_request_format_roundtrip() -> None:
+    payload = InputStreamRequestFormatPayload(
+        source=InputStreamRequestFormatSource(sample_rate=44100)
+    )
+    message = InputStreamRequestFormatMessage(payload=payload)
     parsed = ServerMessage.from_json(message.to_json())
-    assert isinstance(parsed, ServerCommandMessage)
-    assert parsed.payload.source is not None
-    assert parsed.payload.source.command is None
-    assert parsed.payload.source.format is not None
-    assert parsed.payload.source.format.sample_rate == 44100
-    assert parsed.payload.source.format.channels is None
-    assert parsed.payload.source.vad is not None
-    assert parsed.payload.source.vad.hold_ms == 1500
+    assert isinstance(parsed, InputStreamRequestFormatMessage)
+    assert parsed.payload.source.sample_rate == 44100
+
+
+def test_input_stream_end_roundtrip() -> None:
+    message = InputStreamEndMessage(payload=InputStreamEndPayload())
+    parsed = ClientMessage.from_json(message.to_json())
+    assert isinstance(parsed, InputStreamEndMessage)
 
 
 def test_source_client_command_roundtrip() -> None:

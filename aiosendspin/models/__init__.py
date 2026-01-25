@@ -10,6 +10,9 @@ __all__ = [
     "BinaryMessageType",
     "ClientMessage",
     "DeviceInfo",
+    "InputStreamEndMessage",
+    "InputStreamRequestFormatMessage",
+    "InputStreamStartMessage",
     "MediaCommand",
     "PictureFormat",
     "PlaybackStateType",
@@ -20,6 +23,8 @@ __all__ = [
     "SourceCommand",
     "SourceClientCommand",
     "SourceFormatHint",
+    "InputStreamRequestFormatSource",
+    "InputStreamStartSource",
     "SourceSignalType",
     "SourceStateType",
     "SourceVadSettings",
@@ -42,8 +47,18 @@ import struct
 from typing import NamedTuple
 
 from . import artwork, controller, core, metadata, player, source, types, visualizer
-from .core import DeviceInfo
-from .source import SourceFormatHint, SourceVadSettings
+from .core import (
+    DeviceInfo,
+    InputStreamEndMessage,
+    InputStreamRequestFormatMessage,
+    InputStreamStartMessage,
+)
+from .source import (
+    InputStreamRequestFormatSource,
+    InputStreamStartSource,
+    SourceFormatHint,
+    SourceVadSettings,
+)
 from .types import (
     AudioCodec,
     BinaryMessageType,

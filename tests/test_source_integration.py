@@ -8,6 +8,7 @@ import pytest
 from aiosendspin.client import SendspinClient
 from aiosendspin.models.source import (
     ClientHelloSourceSupport,
+    InputStreamStartSource,
     SourceFormat,
     SourceStatePayload,
     SourceVadSettings,
@@ -69,6 +70,14 @@ async def test_source_flow_select_start_stop() -> None:
         state=SourceStatePayload(
             state=SourceStateType.IDLE,
             signal=SourceSignalType.ABSENT,
+        )
+    )
+    await source_client.send_input_stream_start(
+        InputStreamStartSource(
+            codec=AudioCodec.PCM,
+            channels=1,
+            sample_rate=48000,
+            bit_depth=16,
         )
     )
     server_client = None

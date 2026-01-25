@@ -433,19 +433,18 @@ class SendspinServer:
             return
         if source.state != SourceStateType.STREAMING:
             return
-        support = source.support
-        if support is None:
+        stream_format = source.input_stream_format
+        if stream_format is None:
             return
-        preferred_format = support.supported_formats[0]
-        if preferred_format.codec is not AudioCodec.PCM:
+        if stream_format.codec is not AudioCodec.PCM:
             logger.warning(
                 "Source %s uses unsupported codec %s",
                 client.client_id,
-                preferred_format.codec,
+                stream_format.codec,
             )
             return
 
-        frame_stride = preferred_format.channels * (preferred_format.bit_depth // 8)
+        frame_stride = stream_format.channels * (stream_format.bit_depth // 8)
         if frame_stride <= 0 or len(data) % frame_stride:
             logger.warning("Dropping misaligned PCM chunk from source %s", client.client_id)
             return
@@ -462,14 +461,14 @@ class SendspinServer:
     ) -> SourceStreamSession | None:
         """Start source playback for a group."""
         source = client.source
-        if source is None or source.support is None:
+        if source is None or source.input_stream_format is None:
             return None
         group = client.group
         if not group.players():
             logger.info("No players available for source %s; dropping audio", client.client_id)
             return None
 
-        preferred_format = source.support.supported_formats[0]
+        preferred_format = source.input_stream_format
         audio_format = AudioFormat(
             sample_rate=preferred_format.sample_rate,
             bit_depth=preferred_format.bit_depth,
