@@ -41,6 +41,7 @@ from aiosendspin.models.types import (
     SourceClientCommand,
     ServerMessage,
     SourceCommand,
+    SourceControl,
     SourceSignalType,
     SourceStateType,
 )
@@ -61,6 +62,7 @@ def test_source_hello_roundtrip() -> None:
                     bit_depth=16,
                 )
             ],
+            controls=[SourceControl.PLAY, SourceControl.PAUSE],
             features=SourceFeatures(level=True, line_sense=True),
         ),
     )
@@ -111,6 +113,20 @@ def test_source_command_vad_roundtrip() -> None:
     assert parsed.payload.source.command is None
     assert parsed.payload.source.vad is not None
     assert parsed.payload.source.vad.threshold_db == -45.0
+
+
+def test_source_command_control_roundtrip() -> None:
+    payload = ServerCommandPayload(
+        source=SourceCommandPayload(
+            control=SourceControl.ACTIVATE,
+        )
+    )
+    message = ServerCommandMessage(payload=payload)
+    parsed = ServerMessage.from_json(message.to_json())
+    assert isinstance(parsed, ServerCommandMessage)
+    assert parsed.payload.source is not None
+    assert parsed.payload.source.command is None
+    assert parsed.payload.source.control == SourceControl.ACTIVATE
 
 
 def test_input_stream_start_roundtrip() -> None:

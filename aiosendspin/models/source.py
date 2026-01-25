@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.orjson import DataClassORJSONMixin
 
-from .types import AudioCodec, SourceClientCommand, SourceCommand, SourceSignalType, SourceStateType
+from .types import (
+    AudioCodec,
+    SourceClientCommand,
+    SourceCommand,
+    SourceControl,
+    SourceSignalType,
+    SourceStateType,
+)
 
 
 @dataclass
@@ -128,6 +135,8 @@ class ClientHelloSourceSupport(DataClassORJSONMixin):
 
     supported_formats: list[SourceFormat]
     """List of supported formats in priority order (first is preferred)."""
+    controls: list[SourceControl] | None = None
+    """Optional supported source control commands."""
     features: SourceFeatures | None = None
     """Optional feature hints."""
 
@@ -188,6 +197,8 @@ class SourceCommandPayload(DataClassORJSONMixin):
 
     command: SourceCommand | None = None
     """Source command (start/stop)."""
+    control: SourceControl | None = None
+    """Optional source control command."""
     vad: SourceVadSettings | None = None
     """Optional VAD settings hint for the source."""
 

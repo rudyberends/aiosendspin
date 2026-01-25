@@ -190,6 +190,17 @@ class SourceCommand(Enum):
     STOP = "stop"
 
 
+class SourceControl(Enum):
+    """Optional source control commands."""
+
+    PLAY = "play"
+    PAUSE = "pause"
+    NEXT = "next"
+    PREVIOUS = "previous"
+    ACTIVATE = "activate"
+    DEACTIVATE = "deactivate"
+
+
 class SourceClientCommand(Enum):
     """Enum for Source client commands."""
 
